@@ -17,8 +17,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.PhotoSizeSelectActual
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Screenshot
 import androidx.compose.material3.Button
@@ -34,8 +36,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -61,8 +63,9 @@ import com.vsandoram.storagetidy.viewmodel.TidyViewModel
 @Composable
 fun TidyScreen(
     vm: TidyViewModel,
-    onRequestDelete: (List<Uri>) -> Unit,
-    onOpenStorageSettings: () -> Unit
+    onRequestDelete: (List<MediaItem>) -> Unit,
+    onOpenStorageSettings: () -> Unit,
+    onEnableDocuments: () -> Unit
 ) {
     val state by vm.state.collectAsState()
     val selected by vm.selected.collectAsState()
@@ -72,6 +75,11 @@ fun TidyScreen(
             TopAppBar(
                 title = { Text("StorageTidy") },
                 actions = {
+                    if (state is ScanState.Done) {
+                        IconButton(onClick = vm::scan) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Rescan")
+                        }
+                    }
                     IconButton(onClick = onOpenStorageSettings) {
                         Icon(
                             Icons.Rounded.CleaningServices,
@@ -90,7 +98,8 @@ fun TidyScreen(
                 is ScanState.Done -> ResultView(
                     vm = vm,
                     selected = selected,
-                    onRequestDelete = onRequestDelete
+                    onRequestDelete = onRequestDelete,
+                    onEnableDocuments = onEnableDocuments
                 )
             }
         }
@@ -102,7 +111,7 @@ private fun IdleView(onScan: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                "Scan your Gallery and Downloads for duplicate, large and old files.",
+                "Scan your Gallery, Downloads and documents for duplicate, large and old files.",
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(32.dp)
             )
@@ -143,16 +152,17 @@ private fun FailedView(message: String, onRetry: () -> Unit) {
 private fun ResultView(
     vm: TidyViewModel,
     selected: Set<Uri>,
-    onRequestDelete: (List<Uri>) -> Unit
+    onRequestDelete: (List<MediaItem>) -> Unit,
+    onEnableDocuments: () -> Unit
 ) {
     val report = (vm.state.collectAsState().value as ScanState.Done).report
     var tab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Duplicates", "Screenshots", "Large", "Old")
+    val tabs = listOf("Duplicates", "Similar", "Documents", "Screenshots", "Large", "Old")
 
     Column(Modifier.fillMaxSize()) {
         SummaryCard(report.totalBytes, report.duplicateCount, report.duplicateReclaimableBytes)
 
-        TabRow(selectedTabIndex = tab) {
+        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
             tabs.forEachIndexed { i, title ->
                 Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
             }
@@ -160,21 +170,61 @@ private fun ResultView(
 
         Box(Modifier.weight(1f)) {
             when (tab) {
-                0 -> DuplicateList(report.duplicates, selected, vm::toggle, vm::selectAllExtras, vm::clearSelection)
-                1 -> FlatList(report.screenshots, selected, vm::toggle, Icons.Rounded.Screenshot)
-                2 -> FlatList(report.largeFiles, selected, vm::toggle, Icons.Rounded.PhotoSizeSelectActual)
-                3 -> FlatList(report.oldFiles, selected, vm::toggle, Icons.Rounded.Schedule)
+                0 -> DuplicateList(
+                    report.duplicates, selected, vm::toggle,
+                    { vm.selectExtrasOf(report.duplicates) }, vm::clearSelection
+                )
+                1 -> DuplicateList(
+                    report.similar, selected, vm::toggle,
+                    { vm.selectExtrasOf(report.similar) }, vm::clearSelection,
+                    similar = true
+                )
+                2 -> DocumentsTab(report, selected, vm::toggle, onEnableDocuments)
+                3 -> FlatList(report.screenshots, selected, vm::toggle, Icons.Rounded.Screenshot)
+                4 -> FlatList(report.largeFiles, selected, vm::toggle, Icons.Rounded.PhotoSizeSelectActual)
+                5 -> FlatList(report.oldFiles, selected, vm::toggle, Icons.Rounded.Schedule)
             }
         }
 
         if (selected.isNotEmpty()) {
             Button(
-                onClick = { onRequestDelete(vm.selectedUris()) },
+                onClick = { onRequestDelete(vm.selectedItems()) },
                 modifier = Modifier.fillMaxWidth().padding(16.dp)
             ) {
                 Text("Delete ${selected.size} selected  ·  free ${Format.bytes(vm.selectedBytes())}")
             }
         }
+    }
+}
+
+/** The Documents tab: either a "grant access" prompt, an empty note, or the list
+ *  of PDF / Word / Excel files found across the phone. */
+@Composable
+private fun DocumentsTab(
+    report: com.vsandoram.storagetidy.data.ScanReport,
+    selected: Set<Uri>,
+    onToggle: (Uri) -> Unit,
+    onEnableDocuments: () -> Unit
+) {
+    if (!report.documentsAccessGranted) {
+        Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "To find PDF, Word and Excel files across your whole phone (not just Downloads), StorageTidy needs ‘All files access’.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Text(
+                    "After granting it, tap the refresh icon at the top to rescan.",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 20.dp)
+                )
+                Button(onClick = onEnableDocuments) { Text("Grant all-files access") }
+            }
+        }
+    } else {
+        FlatList(report.documents, selected, onToggle, Icons.Rounded.Description)
     }
 }
 
@@ -197,9 +247,13 @@ private fun DuplicateList(
     selected: Set<Uri>,
     onToggle: (Uri) -> Unit,
     onSelectAll: () -> Unit,
-    onClear: () -> Unit
+    onClear: () -> Unit,
+    similar: Boolean = false
 ) {
-    if (groups.isEmpty()) { EmptyState("No duplicates found. "); return }
+    if (groups.isEmpty()) {
+        EmptyState(if (similar) "No similar photos found. " else "No duplicates found. ")
+        return
+    }
     LazyColumn(Modifier.fillMaxSize()) {
         item {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -210,8 +264,12 @@ private fun DuplicateList(
         }
         groups.forEach { group ->
             item {
+                val header = if (similar)
+                    "${group.items.size} similar photos · keeping the newest"
+                else
+                    "${group.items.size} identical copies · ${Format.bytes(group.keeper.sizeBytes)} each"
                 Text(
-                    "${group.items.size} identical copies · ${Format.bytes(group.keeper.sizeBytes)} each",
+                    header,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)

@@ -11,6 +11,13 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
 
+    <!--
+      Optional all-files access, used only to find documents (PDF / Word / Excel)
+      outside the Downloads folder. The app works without it (media + Downloads
+      still scan); the Documents tab prompts for it when the user wants it.
+    -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
     <!-- Legacy read for Android 10–12 devices, capped so 13+ ignores it. -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"

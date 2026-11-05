@@ -12,8 +12,8 @@ import java.security.MessageDigest
  *      so it is discarded without ever being read.
  *   2. Within each size bucket, hash file contents (SHA-256) and group by hash.
  *
- * Keeper rule: within a duplicate group we keep the OLDEST copy (smallest
- * dateAdded) — usually the original — and mark the newer copies as reclaimable.
+ * Keeper rule: within a duplicate group we keep the MOST RECENT copy (largest
+ * dateAdded) and mark the older copies as reclaimable.
  */
 class DuplicateFinder(private val context: Context) {
 
@@ -42,14 +42,20 @@ class DuplicateFinder(private val context: Context) {
         byHash.values
             .filter { it.size > 1 }
             .map { group ->
-                val ordered = group.sortedBy { it.dateAddedSeconds } // oldest first = keeper
+                // Newest first → the most recent copy is the keeper, older ones
+                // are the reclaimable extras.
+                val ordered = group.sortedByDescending { it.dateAddedSeconds }
                 DuplicateGroup(hash = ordered.first().contentHash!!, items = ordered)
             }
             .sortedByDescending { it.reclaimableBytes } // biggest wins at the top
     }
 
     private fun hashOf(item: MediaItem): String? = try {
-        context.contentResolver.openInputStream(item.uri)?.use { stream ->
+        // Documents carry an absolute path and are read directly; media items are
+        // read through the content resolver.
+        val input = if (item.filePath != null) java.io.FileInputStream(item.filePath)
+                    else context.contentResolver.openInputStream(item.uri)
+        input?.use { stream ->
             val digest = MessageDigest.getInstance("SHA-256")
             val buf = ByteArray(64 * 1024)
             while (true) {

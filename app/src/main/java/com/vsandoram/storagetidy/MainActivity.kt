@@ -2,6 +2,7 @@ package com.vsandoram.storagetidy
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.IntentSender
 import android.net.Uri
@@ -10,6 +11,7 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.provider.Settings
 import android.widget.Toast
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -53,20 +55,46 @@ class MainActivity : ComponentActivity() {
                     pendingDelete = emptyList()
                 }
 
+                // Launches Android's system delete sheet for media items.
+                val requestMediaDelete: (List<Uri>) -> Unit = { uris ->
+                    if (uris.isNotEmpty()) {
+                        pendingDelete = uris
+                        val sender = buildDeleteRequest(uris)
+                        if (sender != null) {
+                            deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                        } else {
+                            pendingDelete = emptyList()
+                        }
+                    }
+                }
+
                 if (granted) {
                     TidyScreen(
                         vm = vm,
                         onOpenStorageSettings = ::openStorageSettings,
-                        onRequestDelete = { uris ->
-                            if (uris.isEmpty()) return@TidyScreen
-                            pendingDelete = uris
-                            val sender = buildDeleteRequest(uris)
-                            if (sender != null) {
-                                deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
-                            } else {
-                                // Pre-R fallback: direct delete (app owns no media, so this
-                                // path is only reached on very old devices below minSdk anyway).
-                                pendingDelete = emptyList()
+                        onEnableDocuments = ::requestAllFilesAccess,
+                        onRequestDelete = { items ->
+                            // Documents are plain files we delete directly (with a
+                            // confirmation, since there's no system sheet for them);
+                            // media goes through Android's own delete dialog.
+                            val docItems = items.filter { it.filePath != null }
+                            val mediaUris = items.filter { it.filePath == null }.map { it.uri }
+                            when {
+                                docItems.isNotEmpty() -> {
+                                    AlertDialog.Builder(this@MainActivity)
+                                        .setTitle("Delete ${docItems.size} document(s)?")
+                                        .setMessage("This permanently deletes the selected documents from your phone.")
+                                        .setPositiveButton("Delete") { _, _ ->
+                                            val gone = docItems.filter {
+                                                runCatching { File(it.filePath!!).delete() }.getOrDefault(false)
+                                            }
+                                            vm.onDeleted(gone.map { it.uri })
+                                            requestMediaDelete(mediaUris)
+                                        }
+                                        .setNegativeButton("Cancel", null)
+                                        .show()
+                                }
+                                mediaUris.isNotEmpty() -> requestMediaDelete(mediaUris)
                             }
                         }
                     )
@@ -110,6 +138,39 @@ class MainActivity : ComponentActivity() {
             } catch (_: Exception) { /* try the next one */ }
         }
         Toast.makeText(this, "Open Settings → Device care → Storage", Toast.LENGTH_LONG).show()
+    }
+
+    /**
+     * Opens the system screen where the user grants "All files access", which the
+     * document scan needs to reach files outside Downloads. Optional — the app
+     * works without it.
+     */
+    private fun requestAllFilesAccess() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            Toast.makeText(this, "Document scanning needs Android 11 or newer", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.fromParts("package", packageName, null)
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (_: Exception) {
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (_: Exception) {
+                Toast.makeText(
+                    this,
+                    "Enable 'All files access' for StorageTidy in Settings → Apps",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
     }
 
     /**

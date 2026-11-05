@@ -3,13 +3,19 @@ package com.vsandoram.storagetidy.data
 import android.net.Uri
 
 /** Where a scanned file came from, used for grouping and filtering in the UI. */
-enum class Source { GALLERY, DOWNLOAD }
+enum class Source { GALLERY, DOWNLOAD, DOCUMENT }
 
 /**
- * One file found on the device. [uri] is a MediaStore content URI — the only
- * handle we use to delete, so we never touch raw file paths or need all-files
- * access. [contentHash] is filled in lazily (null until hashed) because hashing
- * every file up front would be slow; we only hash candidates that share a size.
+ * One file found on the device.
+ *
+ * For media (Gallery / Downloads) [uri] is a MediaStore content URI and
+ * [filePath] is null — we delete those through the system delete dialog.
+ * For documents found by walking storage, [filePath] is the absolute path and
+ * [uri] is a file:// URI used only as a stable key; those are deleted directly
+ * (the app holds all-files access for that).
+ *
+ * [contentHash] is filled in lazily (null until hashed) because hashing every
+ * file up front would be slow; we only hash candidates that share a size.
  */
 data class MediaItem(
     val id: Long,
@@ -20,6 +26,7 @@ data class MediaItem(
     val source: Source,
     val mimeType: String?,
     val relativePath: String? = null,
+    val filePath: String? = null,
     var contentHash: String? = null
 ) {
     /** True for camera/app screenshots — the single biggest source of gallery
@@ -27,6 +34,9 @@ data class MediaItem(
     val isScreenshot: Boolean
         get() = (relativePath?.contains("Screenshots", ignoreCase = true) == true) ||
                 displayName.startsWith("Screenshot", ignoreCase = true)
+
+    /** True for PDF / Office documents found by the storage walk. */
+    val isDocument: Boolean get() = source == Source.DOCUMENT
 }
 
 /** A set of files with identical content. The first is kept; the rest are the
