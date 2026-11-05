@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose supplies the real theme at runtime; this is the launch/splash
+         baseline so the app window matches before Compose draws. -->
+    <style name="Theme.StorageTidy" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
