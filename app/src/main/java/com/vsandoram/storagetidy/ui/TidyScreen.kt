@@ -53,7 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.vsandoram.storagetidy.data.DuplicateGroup
 import com.vsandoram.storagetidy.data.MediaItem
-import com.vsandoram.storagetidy.data.ScanState
+import com.vsandoram.storagetidy.viewmodel.ScanState
 import com.vsandoram.storagetidy.util.Format
 import com.vsandoram.storagetidy.viewmodel.TidyViewModel
 
